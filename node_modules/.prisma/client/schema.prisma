@@ -1,0 +1,189 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int       @id @default(autoincrement())
+  name        String
+  email       String    @unique
+  password    String
+  phoneNumber String?   @unique
+  role        Role      @default(CONSUMER)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  consumer    Consumer?
+  operator    Operator?
+
+  @@map("users")
+}
+
+model Consumer {
+  id             Int            @id @default(autoincrement())
+  userId         Int            @unique
+  meterNumber    String         @unique
+  address        String
+  connectionType ConnectionType @default(RESIDENTIAL)
+  status         ConsumerStatus @default(ACTIVE)
+  lastReading    Float          @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  bills          Bill[]
+  complaints     Complaint[]
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments       Payment[]
+
+  @@map("consumers")
+}
+
+model Operator {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  bills     Bill[]   @relation("GeneratedBy")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("operators")
+}
+
+model Bill {
+  id          Int        @id @default(autoincrement())
+  billNumber  String     @unique @default(uuid())
+  consumerId  Int
+  operatorId  Int?
+  prevReading Float
+  currReading Float
+  units       Float
+  ratePerUnit Float      @default(6)
+  baseAmount  Float
+  taxPercent  Float      @default(5)
+  taxAmount   Float
+  totalAmount Float
+  dueDate     DateTime
+  billMonth   String
+  status      BillStatus @default(PENDING)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  consumer    Consumer   @relation(fields: [consumerId], references: [id], onDelete: Cascade)
+  operator    Operator?  @relation("GeneratedBy", fields: [operatorId], references: [id])
+  payments    Payment[]
+
+  @@index([consumerId])
+  @@index([status])
+  @@index([operatorId], map: "bills_operatorId_fkey")
+  @@map("bills")
+}
+
+model Payment {
+  id            Int           @id @default(autoincrement())
+  transactionId String        @unique @default(uuid())
+  billId        Int
+  consumerId    Int
+  amount        Float
+  mode          PaymentMode   @default(ONLINE)
+  status        PaymentStatus @default(SUCCESS)
+  paidAt        DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  bill          Bill          @relation(fields: [billId], references: [id], onDelete: Cascade)
+  consumer      Consumer      @relation(fields: [consumerId], references: [id])
+
+  @@index([billId])
+  @@index([consumerId])
+  @@map("payments")
+}
+
+model Complaint {
+  id              Int             @id @default(autoincrement())
+  complaintNumber String          @unique @default(uuid())
+  consumerId      Int
+  type            ComplaintType
+  description     String          @db.Text
+  status          ComplaintStatus @default(PENDING)
+  assignedTo      String?
+  resolvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  subject         String
+  consumer        Consumer        @relation(fields: [consumerId], references: [id], onDelete: Cascade)
+
+  @@index([consumerId])
+  @@index([status])
+  @@map("complaints")
+}
+
+model SystemSetting {
+  id              Int      @id @default(1)
+  maintenanceMode Boolean  @default(false)
+  residentialRate Float    @default(6)
+  commercialRate  Float    @default(8)
+  industrialRate  Float    @default(12)
+  taxPercent      Float    @default(5)
+  gatewayIp       String   @default("192.168.1.100")
+  gatewayPort     Int      @default(502)
+  baudRate        Int      @default(9600)
+  pollingInterval Int      @default(15)
+  kwhRegister     Int      @default(40001)
+  voltageRegister Int      @default(40010)
+  currentRegister Int      @default(40020)
+  updatedAt       DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  CONSUMER
+}
+
+enum ConnectionType {
+  RESIDENTIAL
+  COMMERCIAL
+  INDUSTRIAL
+}
+
+enum ConsumerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum BillStatus {
+  PENDING
+  PAID
+  OVERDUE
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CREDIT_CARD
+  BANK_TRANSFER
+  ONLINE
+}
+
+enum PaymentStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+enum ComplaintType {
+  BILLING_ISSUE
+  POWER_FAILURE
+  VOLTAGE_FLUCTUATION
+  METER_ISSUE
+  SPARKING_ISSUE
+  BILL_DELIVERY
+  OTHER
+}
+
+enum ComplaintStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+}
