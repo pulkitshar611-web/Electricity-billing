@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { createNotification } = require('./notification.controller');
 
 // ─────────────────────────────────────────
 // POST /api/payments  (Consumer - pay a bill)
@@ -39,6 +40,13 @@ const processPayment = async (req, res) => {
 
             return p;
         });
+
+        // Trigger Notification
+        await createNotification(
+            userId,
+            'Payment Successful ✅',
+            `Thank you! Your payment of ₹${Number(amount).toFixed(2)} for Bill #${bill.billNumber || bill.id} has been received successfully.`
+        );
 
         res.status(201).json({
             success: true,

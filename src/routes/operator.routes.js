@@ -16,6 +16,8 @@ const router = express.Router();
 // All routes require OPERATOR role (or ADMIN for testing)
 const operatorAuth = [protect, authorize('OPERATOR', 'ADMIN')];
 
+router.get('/test', (req, res) => res.json({ message: 'Operator routes are active!' }));
+
 // ── Dashboard ──────────────────────────────────────────────────
 // GET /api/operator/dashboard
 router.get('/dashboard', ...operatorAuth, getOperatorDashboard);

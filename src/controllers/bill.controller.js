@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { createNotification } = require('./notification.controller');
 
 // Helper: calculate bill amount
 const calculateBill = (prevReading, currReading, ratePerUnit = 6.0, taxPercent = 5.0) => {
@@ -105,6 +106,18 @@ const generateBill = async (req, res) => {
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
 
+        // Check if bill already exists for this consumer and month (Proper logic)
+        const existingBill = await prisma.bill.findFirst({
+            where: { consumerId: Number(consumerId), billMonth }
+        });
+
+        if (existingBill) {
+            return res.status(400).json({
+                success: false,
+                message: `Bill already generated for ${billMonth}. Duplicate generation prevented.`
+            });
+        }
+
         const prevReading = consumer.lastReading;
 
         if (Number(currReading) < prevReading) {
@@ -144,6 +157,13 @@ const generateBill = async (req, res) => {
             where: { id: Number(consumerId) },
             data: { lastReading: Number(currReading) },
         });
+
+        // Trigger Notification
+        await createNotification(
+            consumer.userId,
+            'New Bill Generated ⚡',
+            `Your bill for ${billMonth} has been generated. Amount: ₹${totalAmount.toFixed(2)}. Please pay before ${new Date(dueDate).toLocaleDateString()}.`
+        );
 
         res.status(201).json({
             success: true,

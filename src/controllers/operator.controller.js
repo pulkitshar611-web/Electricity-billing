@@ -181,18 +181,42 @@ const receivePayment = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Bill ID and amount are required.' });
         }
 
-        const bill = await prisma.bill.findUnique({
-            where: { id: Number(billId) },
-            include: { consumer: true },
+        const searchValue = String(billId).trim();
+        const searchNumber = isNaN(Number(searchValue)) ? -1 : Number(searchValue);
+
+        // Search for the bill regardless of status first to give better feedback
+        const bill = await prisma.bill.findFirst({
+            where: {
+                OR: [
+                    { id: searchNumber },
+                    { billNumber: { contains: searchValue } },
+                    { consumer: { meterNumber: { contains: searchValue } } },
+                    { consumer: { user: { name: { contains: searchValue } } } }
+                ]
+            },
+            include: { consumer: { include: { user: true } } },
+            orderBy: { createdAt: 'desc' }
         });
 
-        if (!bill) return res.status(404).json({ success: false, message: 'Bill not found.' });
-        if (bill.status === 'PAID') return res.status(400).json({ success: false, message: 'Bill is already paid.' });
+        if (!bill) {
+            console.log(`[PAYMENT_API] No bill found for query: "${searchValue}"`);
+            return res.status(200).json({
+                success: false,
+                message: `No bill found matching "${searchValue}". Please check ID/Name.`
+            });
+        }
+
+        if (bill.status === 'PAID') {
+            return res.status(200).json({
+                success: false,
+                message: `Bill #${bill.billNumber.slice(0, 8).toUpperCase()} is already PAID.`
+            });
+        }
 
         const payment = await prisma.$transaction(async (tx) => {
             const p = await tx.payment.create({
                 data: {
-                    billId: Number(billId),
+                    billId: bill.id,
                     consumerId: bill.consumerId,
                     amount: Number(amount),
                     mode: mode || 'CASH',
@@ -202,21 +226,30 @@ const receivePayment = async (req, res) => {
             });
 
             await tx.bill.update({
-                where: { id: Number(billId) },
+                where: { id: bill.id },
                 data: { status: 'PAID' },
             });
 
             return p;
         });
 
+        // Trigger Notification to Consumer
+        await prisma.notification.create({
+            data: {
+                userId: bill.consumer.userId,
+                title: 'Payment Recorded ✅',
+                message: `An offline payment of ₹${Number(amount).toFixed(2)} for Bill #${bill.billNumber.slice(0, 8).toUpperCase()} has been recorded.`,
+            }
+        });
+
         res.status(201).json({
             success: true,
-            message: 'Payment recorded successfully.',
+            message: `Payment of ₹${Number(amount).toFixed(2)} for ${bill.consumer.user.name} recorded!`,
             data: {
                 id: payment.id,
-                transactionId: payment.transactionId,
+                billNumber: bill.billNumber,
+                consumerName: bill.consumer.user.name,
                 amount: payment.amount,
-                mode: payment.mode,
                 paidAt: payment.paidAt,
             },
         });
@@ -372,6 +405,18 @@ const getOperatorConsumerById = async (req, res) => {
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
 
+        // Check if bill already exists for this consumer and month
+        const existingBill = await prisma.bill.findFirst({
+            where: { consumerId: Number(consumerId), billMonth }
+        });
+
+        if (existingBill) {
+            return res.status(400).json({
+                success: false,
+                message: `A bill for ${billMonth} has already been generated for this consumer.`
+            });
+        }
+
         res.status(200).json({
             success: true,
             data: {
@@ -447,7 +492,19 @@ const updateOperatorComplaint = async (req, res) => {
         const updated = await prisma.complaint.update({
             where: { id: complaintId },
             data: updateData,
+            include: { consumer: true }
         });
+
+        // Trigger Notification to Consumer
+        if (status) {
+            await prisma.notification.create({
+                data: {
+                    userId: updated.consumer.userId,
+                    title: `Complaint Update: ${status.replace(/_/g, ' ')} 📋`,
+                    message: `The status of your complaint #${updated.complaintNumber.slice(0, 8).toUpperCase()} has been updated to ${status.replace(/_/g, ' ')} by our team.`,
+                }
+            });
+        }
 
         res.status(200).json({
             success: true,

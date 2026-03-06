@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { createNotification } = require('./notification.controller');
 
 // ─────────────────────────────────────────
 // POST /api/complaints  (Consumer - raise)
@@ -24,6 +25,13 @@ const raiseComplaint = async (req, res) => {
                 status: 'PENDING',
             },
         });
+
+        // Trigger Notification
+        await createNotification(
+            userId,
+            'Complaint Raised 📢',
+            `Your complaint regarding "${subject}" has been registered successfully. Ref: #${complaint.complaintNumber.slice(0, 8).toUpperCase()}.`
+        );
 
         res.status(201).json({
             success: true,
@@ -106,7 +114,17 @@ const updateComplaintStatus = async (req, res) => {
         const updated = await prisma.complaint.update({
             where: { id: complaintId },
             data: updateData,
+            include: { consumer: true }
         });
+
+        // Trigger Notification
+        if (status) {
+            await createNotification(
+                updated.consumer.userId,
+                `Complaint Update: ${status.replace(/_/g, ' ')} 📋`,
+                `The status of your complaint #${updated.complaintNumber.slice(0, 8).toUpperCase()} has been updated to ${status.replace(/_/g, ' ')}.`
+            );
+        }
 
         res.status(200).json({
             success: true,

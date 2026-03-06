@@ -12,6 +12,7 @@ const paymentRoutes = require('./routes/payment.routes');
 const complaintRoutes = require('./routes/complaint.routes');
 const settingRoutes = require('./routes/setting.routes');
 const operatorRoutes = require('./routes/operator.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 const app = express();
 
@@ -39,6 +40,13 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/operator', operatorRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// Catch-all for undefined API routes (Proper Debugging)
+app.use('/api/*', (req, res) => {
+  console.log(`[API_404_ERR] Route ${req.method} ${req.originalUrl} not found!`);
+  res.status(404).json({ success: false, message: `Route ${req.originalUrl} not found in this system.` });
+});
 
 // Base route
 app.get('/', (req, res) => {
