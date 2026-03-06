@@ -195,40 +195,71 @@ const getBillById = async (req, res) => {
 // ─────────────────────────────────────────
 const getDashboardStats = async (req, res) => {
     try {
-        const [totalConsumers, totalBills, pendingBills, paidPayments, recentPayments, recentComplaints] =
-            await prisma.$transaction([
-                prisma.consumer.count(),
-                prisma.bill.count(),
-                prisma.bill.aggregate({ where: { status: 'PENDING' }, _sum: { totalAmount: true } }),
-                prisma.payment.aggregate({ where: { status: 'SUCCESS' }, _sum: { amount: true } }),
-                prisma.payment.findMany({
-                    take: 5,
-                    orderBy: { paidAt: 'desc' },
-                    include: { consumer: { include: { user: { select: { name: true } } } } },
-                }),
-                prisma.complaint.findMany({
-                    take: 5,
-                    where: { status: 'PENDING' },
-                    orderBy: { createdAt: 'desc' },
-                    include: { consumer: { include: { user: { select: { name: true } } } } },
-                }),
-            ]);
+        // All queries fire in PARALLEL — no serial round-trips
+        const [
+            totalConsumers,
+            totalBills,
+            pendingBills,
+            paidPayments,
+            recentPayments,
+            recentComplaints,
+            rawMonthlyRevenue,
+        ] = await Promise.all([
+            prisma.consumer.count(),
 
-        // Monthly revenue for chart (last 6 months)
-        // Convert BigInt to Number as queryRaw returns BigInt for sums
-        const rawMonthlyRevenue = await prisma.$queryRaw`
-            SELECT 
-                DATE_FORMAT(paidAt, '%b') as name,
-                SUM(amount) as revenue
-            FROM payments
-            WHERE status = 'SUCCESS' AND paidAt >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-            GROUP BY DATE_FORMAT(paidAt, '%Y-%m'), DATE_FORMAT(paidAt, '%b')
-            ORDER BY DATE_FORMAT(paidAt, '%Y-%m') ASC
-        `;
+            prisma.bill.count(),
+
+            prisma.bill.aggregate({
+                where: { status: 'PENDING' },
+                _sum: { totalAmount: true },
+            }),
+
+            prisma.payment.aggregate({
+                where: { status: 'SUCCESS' },
+                _sum: { amount: true },
+            }),
+
+            prisma.payment.findMany({
+                take: 5,
+                orderBy: { paidAt: 'desc' },
+                select: {
+                    id: true,
+                    amount: true,
+                    mode: true,
+                    paidAt: true,
+                    status: true,
+                    consumer: { select: { user: { select: { name: true } } } },
+                },
+            }),
+
+            prisma.complaint.findMany({
+                take: 5,
+                where: { status: 'PENDING' },
+                orderBy: { createdAt: 'desc' },
+                select: {
+                    id: true,
+                    type: true,
+                    status: true,
+                    createdAt: true,
+                    consumer: { select: { user: { select: { name: true } } } },
+                },
+            }),
+
+            prisma.$queryRaw`
+                SELECT
+                    DATE_FORMAT(paidAt, '%b') as name,
+                    SUM(amount) as revenue
+                FROM payments
+                WHERE status = 'SUCCESS'
+                  AND paidAt >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+                GROUP BY DATE_FORMAT(paidAt, '%Y-%m'), DATE_FORMAT(paidAt, '%b')
+                ORDER BY DATE_FORMAT(paidAt, '%Y-%m') ASC
+            `,
+        ]);
 
         const monthlyRevenue = rawMonthlyRevenue.map(item => ({
             name: item.name,
-            revenue: Number(item.revenue) || 0
+            revenue: Number(item.revenue) || 0,
         }));
 
         res.status(200).json({
@@ -261,5 +292,6 @@ const getDashboardStats = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error.', error: error.message });
     }
 };
+
 
 module.exports = { getAllBills, getMyBills, generateBill, getBillById, getDashboardStats };

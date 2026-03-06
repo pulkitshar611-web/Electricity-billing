@@ -24,6 +24,10 @@ app.use(cors({
   credentials: true
 }));
 
+// Body parsers — REQUIRED to read req.body
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/consumers', consumerRoutes);
@@ -35,16 +39,16 @@ app.use('/api/operator', operatorRoutes);
 
 // Base route
 app.get('/', (req, res) => {
-    res.send('PowerBill API is running...');
+  res.send('PowerBill API is running...');
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  console.error(err.stack);
+  res.status(500).json({ success: false, message: 'Internal Server Error' });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
