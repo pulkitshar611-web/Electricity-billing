@@ -24,6 +24,8 @@ app.use(cors({
     'http://localhost:5174',
     'http://localhost:5175',
     'https://electricity-billing.kiaantechnology.com',
+    'https://electricity-billing-production.up.railway.app',
+    'https://electricity-billing-production-4c58.up.railway.app',
   ],
   credentials: true
 }));
