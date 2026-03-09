@@ -405,18 +405,6 @@ const getOperatorConsumerById = async (req, res) => {
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
 
-        // Check if bill already exists for this consumer and month
-        const existingBill = await prisma.bill.findFirst({
-            where: { consumerId: Number(consumerId), billMonth }
-        });
-
-        if (existingBill) {
-            return res.status(400).json({
-                success: false,
-                message: `A bill for ${billMonth} has already been generated for this consumer.`
-            });
-        }
-
         res.status(200).json({
             success: true,
             data: {
