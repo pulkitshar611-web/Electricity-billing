@@ -50,9 +50,41 @@ model Consumer {
   complaints     Complaint[]
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   payments       Payment[]
+  meter          Meter?
 
   @@map("consumers")
 }
+
+model Meter {
+  id              Int      @id @default(autoincrement())
+  consumerId      Int      @unique
+  meterId         String   @unique
+  connectionType  String   // TCP or RS485
+  ipAddress       String?
+  port            Int?
+  comPort         String?
+  baudRate        Int?
+  modbusAddress   Int
+  status          String   @default("Disconnected") // Connected, Disconnected
+  lastUpdated     DateTime @default(now()) @updatedAt
+  consumer        Consumer @relation(fields: [consumerId], references: [id], onDelete: Cascade)
+  registers       Register[]
+
+  @@map("meters")
+}
+
+model Register {
+  id        Int      @id @default(autoincrement())
+  meterId   Int
+  label     String
+  address   Int
+  type      String   @default("Holding") // Holding, Input
+  meter     Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@map("registers")
+}
+
+
 
 model Operator {
   id        Int      @id @default(autoincrement())

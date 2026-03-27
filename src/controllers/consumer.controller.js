@@ -15,13 +15,16 @@ const getAllConsumers = async (req, res) => {
             where.OR = [
                 { user: { name: { contains: search } } },
                 { meterNumber: { contains: search } },
+                { meter: { meterId: { contains: search } } },
             ];
         }
+
 
         const consumers = await prisma.consumer.findMany({
             where,
             include: {
                 user: { select: { id: true, name: true, email: true, role: true } },
+                meter: true
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -37,7 +40,9 @@ const getAllConsumers = async (req, res) => {
             status: c.status === 'ACTIVE' ? 'Active' : 'Inactive',
             lastReading: c.lastReading,
             createdAt: c.createdAt,
+            meter: c.meter
         }));
+
 
         res.status(200).json({ success: true, count: formatted.length, data: formatted });
     } catch (error) {
@@ -53,8 +58,12 @@ const getConsumerById = async (req, res) => {
     try {
         const consumer = await prisma.consumer.findUnique({
             where: { id: Number(req.params.id) },
-            include: { user: { select: { name: true, email: true } } },
+            include: { 
+                user: { select: { name: true, email: true } },
+                meter: true
+            },
         });
+
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
 
@@ -69,8 +78,10 @@ const getConsumerById = async (req, res) => {
                 type: consumer.connectionType,
                 status: consumer.status,
                 lastReading: consumer.lastReading,
+                meter: consumer.meter
             },
         });
+
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error.' });
     }
@@ -81,10 +92,13 @@ const getConsumerById = async (req, res) => {
 // ─────────────────────────────────────────
 const createConsumer = async (req, res) => {
     try {
-        const { name, email, password, meterNumber, address, connectionType } = req.body;
+        const { 
+            name, email, password, meterNumber, address, connectionType,
+            meterId, meterConnectionType, ipAddress, port, comPort, baudRate, modbusAddress 
+        } = req.body;
 
-        if (!name || !email || !password || !meterNumber || !address) {
-            return res.status(400).json({ success: false, message: 'All fields are required.' });
+        if (!name || !email || !password || !meterNumber || !address || !meterId || !meterConnectionType || !modbusAddress) {
+            return res.status(400).json({ success: false, message: 'All fields are required including meter details.' });
         }
 
         // Check if email already exists
@@ -114,15 +128,31 @@ const createConsumer = async (req, res) => {
                         connectionType: connectionType?.toUpperCase() || 'RESIDENTIAL',
                         status: 'ACTIVE',
                         lastReading: 0,
+                        meter: {
+                            create: {
+                                meterId,
+                                connectionType: meterConnectionType,
+                                ipAddress,
+                                port: port ? Number(port) : null,
+                                comPort,
+                                baudRate: baudRate ? Number(baudRate) : null,
+                                modbusAddress: Number(modbusAddress),
+                                status: 'Disconnected'
+                            }
+                        }
                     },
                 },
             },
-            include: { consumer: true },
+            include: { 
+                consumer: {
+                    include: { meter: true }
+                } 
+            },
         });
 
         res.status(201).json({
             success: true,
-            message: 'Consumer created successfully.',
+            message: 'Consumer and Meter created successfully.',
             data: {
                 id: user.consumer.id,
                 name: user.name,
@@ -131,11 +161,12 @@ const createConsumer = async (req, res) => {
                 address: user.consumer.address,
                 type: user.consumer.connectionType,
                 status: user.consumer.status,
+                meter: user.consumer.meter
             },
         });
     } catch (error) {
         console.error('createConsumer Error:', error);
-        res.status(500).json({ success: false, message: 'Server error.' });
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
     }
 };
 
@@ -144,12 +175,15 @@ const createConsumer = async (req, res) => {
 // ─────────────────────────────────────────
 const updateConsumer = async (req, res) => {
     try {
-        const { name, email, address, connectionType, status } = req.body;
+        const { 
+            name, email, address, connectionType, status,
+            meterId, meterConnectionType, ipAddress, port, comPort, baudRate, modbusAddress 
+        } = req.body;
         const consumerId = Number(req.params.id);
 
         const consumer = await prisma.consumer.findUnique({
             where: { id: consumerId },
-            include: { user: true },
+            include: { user: true, meter: true },
         });
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
@@ -169,20 +203,43 @@ const updateConsumer = async (req, res) => {
                 ...(address && { address }),
                 ...(connectionType && { connectionType: connectionType.toUpperCase() }),
                 ...(status && { status: status.toUpperCase() }),
+                meter: {
+                    upsert: {
+                        create: {
+                            meterId: meterId || consumer.meterNumber,
+                            connectionType: meterConnectionType || 'TCP',
+                            ipAddress,
+                            port: port ? Number(port) : null,
+                            comPort,
+                            baudRate: baudRate ? Number(baudRate) : null,
+                            modbusAddress: Number(modbusAddress || 1),
+                        },
+                        update: {
+                            ...(meterId && { meterId }),
+                            ...(meterConnectionType && { connectionType: meterConnectionType }),
+                            ...(ipAddress && { ipAddress }),
+                            ...(port && { port: Number(port) }),
+                            ...(comPort && { comPort }),
+                            ...(baudRate && { baudRate: Number(baudRate) }),
+                            ...(modbusAddress && { modbusAddress: Number(modbusAddress) }),
+                        }
+                    }
+                }
             },
-            include: { user: true },
+            include: { user: true, meter: true },
         });
 
         res.status(200).json({
             success: true,
-            message: 'Consumer updated successfully.',
-            data: { id: updated.id, name: updated.user.name },
+            message: 'Consumer and Meter updated successfully.',
+            data: { id: updated.id, name: updated.user.name, meter: updated.meter },
         });
     } catch (error) {
         console.error('updateConsumer Error:', error);
-        res.status(500).json({ success: false, message: 'Server error.' });
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
     }
 };
+
 
 // ─────────────────────────────────────────
 // DELETE /api/consumers/:id  (Admin)

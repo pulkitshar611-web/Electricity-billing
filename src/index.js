@@ -13,6 +13,7 @@ const complaintRoutes = require('./routes/complaint.routes');
 const settingRoutes = require('./routes/setting.routes');
 const operatorRoutes = require('./routes/operator.routes');
 const notificationRoutes = require('./routes/notification.routes');
+const meterRoutes = require('./routes/meter.routes');
 
 const app = express();
 
@@ -43,6 +44,8 @@ app.use('/api/complaints', complaintRoutes);
 app.use('/api/settings', settingRoutes);
 app.use('/api/operator', operatorRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/meters', meterRoutes);
+
 
 // Catch-all for undefined API routes (Proper Debugging)
 app.use('/api/*', (req, res) => {
