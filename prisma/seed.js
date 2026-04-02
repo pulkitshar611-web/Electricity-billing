@@ -10,7 +10,7 @@ async function main() {
     const adminPassword = await bcrypt.hash('admin123', 10);
     const admin = await prisma.user.upsert({
         where: { email: 'admin@powerbill.com' },
-        update: {},
+        update: { password: adminPassword }, // 🔥 FORCE RESET PASSWORD
         create: {
             name: 'Super Admin',
             email: 'admin@powerbill.com',
@@ -23,7 +23,7 @@ async function main() {
     const operatorPassword = await bcrypt.hash('operator123', 10);
     const operatorUser = await prisma.user.upsert({
         where: { email: 'operator@powerbill.com' },
-        update: {},
+        update: { password: operatorPassword }, // 🔥 FORCE RESET PASSWORD
         create: {
             name: 'Main Operator',
             email: 'operator@powerbill.com',
@@ -47,7 +47,7 @@ async function main() {
     for (const c of consumers) {
         await prisma.user.upsert({
             where: { email: c.email },
-            update: {},
+            update: { password: consumerPassword }, // 🔥 FORCE RESET PASSWORD
             create: {
                 name: c.name,
                 email: c.email,

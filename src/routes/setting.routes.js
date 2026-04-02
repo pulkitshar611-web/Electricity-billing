@@ -1,11 +1,16 @@
 const express = require('express');
-const { getSettings, updateSettings } = require('../controllers/setting.controller');
+const { getSettings, updateSettings, getTeam, addTeamMember, removeTeamMember } = require('../controllers/setting.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
-// Admin only can manage settings
+// Settings manage
 router.get('/', protect, authorize('ADMIN'), getSettings);
 router.put('/', protect, authorize('ADMIN'), updateSettings);
+
+// Team manage
+router.get('/team', protect, authorize('ADMIN'), getTeam);
+router.post('/team', protect, authorize('ADMIN'), addTeamMember);
+router.delete('/team/:id', protect, authorize('ADMIN'), removeTeamMember);
 
 module.exports = router;

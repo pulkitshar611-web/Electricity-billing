@@ -3,13 +3,15 @@ const {
     processPayment,
     getMyPayments,
     getAllPayments,
+    recordManualPayment,
 } = require('../controllers/payment.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 
 const router = express.Router();
 
-// All Payments (Admin)
-router.get('/', protect, authorize('ADMIN'), getAllPayments);
+// Admin Only
+router.get('/', protect, authorize('ADMIN', 'OPERATOR'), getAllPayments);
+router.post('/manual', protect, authorize('ADMIN', 'OPERATOR'), recordManualPayment);
 
 // My Payments (Consumer)
 router.get('/my', protect, authorize('CONSUMER'), getMyPayments);

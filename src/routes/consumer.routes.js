@@ -7,6 +7,7 @@ const {
     deleteConsumer,
     getMyProfile,
     updateMyProfile,
+    getLatestReading,
 } = require('../controllers/consumer.controller');
 const { protect, authorize } = require('../middleware/auth.middleware');
 
@@ -18,6 +19,7 @@ router.post('/', protect, authorize('ADMIN'), createConsumer);
 
 // Admin + Operator
 router.get('/:id', protect, authorize('ADMIN', 'OPERATOR'), getConsumerById);
+router.get('/:id/latest-reading', protect, authorize('ADMIN', 'OPERATOR'), getLatestReading);
 router.put('/:id', protect, authorize('ADMIN'), updateConsumer);
 router.delete('/:id', protect, authorize('ADMIN'), deleteConsumer);
 

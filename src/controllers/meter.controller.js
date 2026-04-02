@@ -19,6 +19,7 @@ const getAllMeters = async (req, res) => {
         const formatted = meters.map(m => ({
             id: m.id,
             meterId: m.meterId,
+            meterName: m.meterName,
             consumerName: m.consumer.user.name,
             connectionType: m.connectionType,
             status: m.status,
@@ -26,7 +27,10 @@ const getAllMeters = async (req, res) => {
             port: m.port,
             comPort: m.comPort,
             baudRate: m.baudRate,
-            modbusAddress: m.modbusAddress,
+            dataBits: m.dataBits,
+            parity: m.parity,
+            stopBits: m.stopBits,
+            modbusAddress: m.modbusAddress, 
             lastUpdated: m.lastUpdated,
             registers: m.registers
         }));
@@ -39,17 +43,78 @@ const getAllMeters = async (req, res) => {
     }
 };
 
-// Test connection (simulated)
+// Create or update meter
+const upsertMeter = async (req, res) => {
+    try {
+        const { id, meterId, meterName, consumerId, connectionType, ipAddress, port, comPort, baudRate, dataBits, parity, stopBits, modbusAddress } = req.body;
+        
+        const data = {
+            meterId,
+            meterName: meterName || 'New Meter',
+            consumerId: Number(consumerId),
+            connectionType,
+            ipAddress,
+            port: port ? Number(port) : null,
+            comPort,
+            baudRate: baudRate ? Number(baudRate) : null,
+            dataBits: dataBits ? Number(dataBits) : 8,
+            parity: parity || 'none',
+            stopBits: stopBits ? Number(stopBits) : 1,
+            modbusAddress: modbusAddress ? Number(modbusAddress) : 1
+        };
+
+        let result;
+        if (id) {
+            result = await prisma.meter.update({
+                where: { id: Number(id) },
+                data
+            });
+        } else {
+            result = await prisma.meter.create({ data });
+        }
+
+        res.status(200).json({ success: true, data: result });
+    } catch (error) {
+        console.error('upsertMeter Error:', error);
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
+    }
+};
+
+// Delete meter
+const deleteMeter = async (req, res) => {
+    try {
+        const { id } = req.params;
+        await prisma.meter.delete({ where: { id: Number(id) } });
+        res.status(200).json({ success: true, message: 'Meter deleted' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+};
+
+// Test connection (real attempt)
 const testConnection = async (req, res) => {
     try {
         const { id } = req.params;
-        const meter = await prisma.meter.findUnique({ where: { id: Number(id) } });
+        const meter = await prisma.meter.findUnique({ 
+            where: { id: Number(id) },
+            include: { registers: true }
+        });
 
         if (!meter) return res.status(404).json({ success: false, message: 'Meter not found.' });
 
-        // Simulate connection logic
-        const isSuccess = Math.random() > 0.2; // 80% success rate for simulation
-
+        const modbusEngine = require('../services/modbusEngine');
+        let isSuccess = false;
+        let message = 'Connection failed';
+        
+        try {
+            const client = await modbusEngine.connectToMeter(meter);
+            isSuccess = !!client;
+            message = 'Connected successfully';
+        } catch (err) {
+            isSuccess = false;
+            message = `Connection failed: ${err.message}`;
+        }
+        
         const newStatus = isSuccess ? 'Connected' : 'Failed';
         
         await prisma.meter.update({
@@ -59,7 +124,7 @@ const testConnection = async (req, res) => {
 
         res.status(200).json({ 
             success: isSuccess, 
-            message: isSuccess ? 'Connected successfully' : 'Connection failed',
+            message: message,
             status: newStatus
         });
     } catch (error) {
@@ -67,39 +132,38 @@ const testConnection = async (req, res) => {
         res.status(500).json({ success: false, message: 'Server error.' });
     }
 };
-
-// Get live dashboard data
+// Get live dashboard data (API Fallback)
 const getLiveDashboardData = async (req, res) => {
     try {
-        // Find all meters and generate random data for them
         const meters = await prisma.meter.findMany({
             include: {
                 consumer: {
                     include: {
                         user: { select: { name: true } }
                     }
-                }
+                },
+                registers: true
             }
         });
 
-        const liveData = meters.map(m => {
-            // Simulate live values
-            const voltage = (220 + Math.random() * 10).toFixed(2);
-            const current = (5 + Math.random() * 5).toFixed(2);
-            const power = (voltage * current / 1000).toFixed(2); // kW
+        // Normally, Socket.io pushes this, but for the first load, let's get the most recent reading for each meter
+        const dataWithLatest = await Promise.all(meters.map(async (m) => {
+            const latestReading = await prisma.meterReading.findFirst({
+                where: { meterId: m.id },
+                orderBy: { createdAt: 'desc' }
+            });
 
             return {
+                ...m,
+                ...latestReading, // This will spread voltage, current, energy etc.
+                id: m.id, // Ensure original meter id is kept
                 meterId: m.meterId,
-                consumerName: m.consumer.user.name,
-                voltage,
-                current,
-                power,
                 status: m.status,
-                lastUpdated: new Date()
+                lastUpdated: m.lastUpdated || latestReading?.createdAt
             };
-        });
+        }));
 
-        res.status(200).json({ success: true, data: liveData });
+        res.status(200).json({ success: true, data: dataWithLatest });
     } catch (error) {
         console.error('getLiveDashboardData Error:', error);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -117,12 +181,15 @@ const updateRegisters = async (req, res) => {
 
         // Batch create new registers
         if (registers && registers.length > 0) {
+            // Note: On some SQLite environments, Prisma createMany might have issues, 
+            // but for standard SQLite it works. We maintain address as a String.
             await prisma.register.createMany({
                 data: registers.map(r => ({
                     meterId: Number(id),
                     label: r.label,
-                    address: Number(r.address),
-                    type: r.type || 'Holding'
+                    address: String(r.address),
+                    functionCode: Number(r.functionCode) || 3,
+                    dataType: r.dataType || 'Float'
                 }))
             });
         }
@@ -136,6 +203,8 @@ const updateRegisters = async (req, res) => {
 
 module.exports = {
     getAllMeters,
+    upsertMeter,
+    deleteMeter,
     testConnection,
     getLiveDashboardData,
     updateRegisters

@@ -15,7 +15,7 @@ const getAllConsumers = async (req, res) => {
             where.OR = [
                 { user: { name: { contains: search } } },
                 { meterNumber: { contains: search } },
-                { meter: { meterId: { contains: search } } },
+                { meters: { some: { meterId: { contains: search } } } },
             ];
         }
 
@@ -24,7 +24,7 @@ const getAllConsumers = async (req, res) => {
             where,
             include: {
                 user: { select: { id: true, name: true, email: true, role: true } },
-                meter: true
+                meters: true
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -40,7 +40,7 @@ const getAllConsumers = async (req, res) => {
             status: c.status === 'ACTIVE' ? 'Active' : 'Inactive',
             lastReading: c.lastReading,
             createdAt: c.createdAt,
-            meter: c.meter
+            meters: c.meters
         }));
 
 
@@ -60,7 +60,7 @@ const getConsumerById = async (req, res) => {
             where: { id: Number(req.params.id) },
             include: { 
                 user: { select: { name: true, email: true } },
-                meter: true
+                meters: true
             },
         });
 
@@ -78,7 +78,7 @@ const getConsumerById = async (req, res) => {
                 type: consumer.connectionType,
                 status: consumer.status,
                 lastReading: consumer.lastReading,
-                meter: consumer.meter
+                meters: consumer.meters
             },
         });
 
@@ -97,72 +97,55 @@ const createConsumer = async (req, res) => {
             meterId, meterConnectionType, ipAddress, port, comPort, baudRate, modbusAddress 
         } = req.body;
 
-        if (!name || !email || !password || !meterNumber || !address || !meterId || !meterConnectionType || !modbusAddress) {
+        if (!name || !email || !meterNumber || !address || !meterId || !meterConnectionType || !modbusAddress) {
             return res.status(400).json({ success: false, message: 'All fields are required including meter details.' });
         }
 
-        // Check if email already exists
         const existingUser = await prisma.user.findUnique({ where: { email } });
-        if (existingUser) {
-            return res.status(400).json({ success: false, message: 'Email already registered.' });
-        }
+        if (existingUser) return res.status(400).json({ success: false, message: 'Email already registered.' });
 
-        // Check meter number
-        const existingMeter = await prisma.consumer.findUnique({ where: { meterNumber } });
-        if (existingMeter) {
-            return res.status(400).json({ success: false, message: 'Meter number already exists.' });
-        }
+        const existingConsumer = await prisma.consumer.findUnique({ where: { meterNumber } });
+        if (existingConsumer) return res.status(400).json({ success: false, message: 'Meter number already exists.' });
 
         const hashedPassword = await bcrypt.hash(password || 'consumer123', 10);
 
         const user = await prisma.user.create({
             data: {
-                name,
-                email,
-                password: hashedPassword,
-                role: 'CONSUMER',
+                name, email, password: hashedPassword, role: 'CONSUMER',
                 consumer: {
                     create: {
-                        meterNumber,
-                        address,
+                        meterNumber, address, 
                         connectionType: connectionType?.toUpperCase() || 'RESIDENTIAL',
-                        status: 'ACTIVE',
-                        lastReading: 0,
-                        meter: {
+                        status: 'ACTIVE', lastReading: 0,
+                        meters: {
                             create: {
-                                meterId,
-                                connectionType: meterConnectionType,
-                                ipAddress,
+                                meterId, connectionType: meterConnectionType, ipAddress,
                                 port: port ? Number(port) : null,
                                 comPort,
                                 baudRate: baudRate ? Number(baudRate) : null,
                                 modbusAddress: Number(modbusAddress),
-                                status: 'Disconnected'
+                                status: 'Disconnected',
+                                // Automatically add standard registers for immediate monitoring
+                                registers: {
+                                    create: [
+                                        { label: 'Voltage', address: '40001', functionCode: 3, dataType: 'Float' },
+                                        { label: 'Current', address: '40003', functionCode: 3, dataType: 'Float' },
+                                        { label: 'Power', address: '40005', functionCode: 3, dataType: 'Float' },
+                                        { label: 'Energy', address: '40007', functionCode: 3, dataType: 'Float' }
+                                    ]
+                                }
                             }
                         }
                     },
                 },
             },
-            include: { 
-                consumer: {
-                    include: { meter: true }
-                } 
-            },
+            include: { consumer: { include: { meters: true } } },
         });
 
         res.status(201).json({
             success: true,
-            message: 'Consumer and Meter created successfully.',
-            data: {
-                id: user.consumer.id,
-                name: user.name,
-                email: user.email,
-                meterNumber: user.consumer.meterNumber,
-                address: user.consumer.address,
-                type: user.consumer.connectionType,
-                status: user.consumer.status,
-                meter: user.consumer.meter
-            },
+            message: 'Consumer, Meter and Standard Registers created successfully.',
+            data: user.consumer
         });
     } catch (error) {
         console.error('createConsumer Error:', error);
@@ -170,9 +153,6 @@ const createConsumer = async (req, res) => {
     }
 };
 
-// ─────────────────────────────────────────
-// PUT /api/consumers/:id  (Admin)
-// ─────────────────────────────────────────
 const updateConsumer = async (req, res) => {
     try {
         const { 
@@ -183,7 +163,7 @@ const updateConsumer = async (req, res) => {
 
         const consumer = await prisma.consumer.findUnique({
             where: { id: consumerId },
-            include: { user: true, meter: true },
+            include: { user: true, meters: true },
         });
 
         if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
@@ -196,17 +176,18 @@ const updateConsumer = async (req, res) => {
             });
         }
 
-        // Update Consumer
+        // Update Consumer & associated Meter
         const updated = await prisma.consumer.update({
             where: { id: consumerId },
             data: {
-                ...(address && { address }),
-                ...(connectionType && { connectionType: connectionType.toUpperCase() }),
-                ...(status && { status: status.toUpperCase() }),
-                meter: {
+                address,
+                connectionType: connectionType?.toUpperCase(),
+                status: status?.toUpperCase(),
+                meters: {
                     upsert: {
+                        where: { id: consumer.meters[0]?.id || 0 },
                         create: {
-                            meterId: meterId || consumer.meterNumber,
+                            meterId: meterId || 'MTR-' + Date.now(),
                             connectionType: meterConnectionType || 'TCP',
                             ipAddress,
                             port: port ? Number(port) : null,
@@ -215,24 +196,22 @@ const updateConsumer = async (req, res) => {
                             modbusAddress: Number(modbusAddress || 1),
                         },
                         update: {
-                            ...(meterId && { meterId }),
-                            ...(meterConnectionType && { connectionType: meterConnectionType }),
-                            ...(ipAddress && { ipAddress }),
-                            ...(port && { port: Number(port) }),
-                            ...(comPort && { comPort }),
-                            ...(baudRate && { baudRate: Number(baudRate) }),
-                            ...(modbusAddress && { modbusAddress: Number(modbusAddress) }),
+                            meterId, connectionType: meterConnectionType, ipAddress,
+                            port: port ? Number(port) : null,
+                            comPort,
+                            baudRate: baudRate ? Number(baudRate) : null,
+                            modbusAddress: Number(modbusAddress),
                         }
                     }
                 }
             },
-            include: { user: true, meter: true },
+            include: { user: true, meters: true },
         });
 
         res.status(200).json({
             success: true,
-            message: 'Consumer and Meter updated successfully.',
-            data: { id: updated.id, name: updated.user.name, meter: updated.meter },
+            message: 'Configuration updated successfully.',
+            data: updated,
         });
     } catch (error) {
         console.error('updateConsumer Error:', error);
@@ -319,6 +298,33 @@ const updateMyProfile = async (req, res) => {
     }
 };
 
+// ─────────────────────────────────────────
+// GET /api/consumers/:id/latest-reading (Admin + Operator)
+// ─────────────────────────────────────────
+const getLatestReading = async (req, res) => {
+    try {
+        const consumer = await prisma.consumer.findUnique({
+            where: { id: Number(req.params.id) },
+            include: { meters: true }
+        });
+
+        if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
+
+        const latestReading = await prisma.meterReading.findFirst({
+            where: { meterId: { in: consumer.meters.map(m => m.id) } },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.status(200).json({ success: true, data: {
+            prevReading: consumer.lastReading,
+            currReading: latestReading?.energy || consumer.lastReading,
+            updatedAt: latestReading?.createdAt
+        }});
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
+    }
+};
+
 module.exports = {
     getAllConsumers,
     getConsumerById,
@@ -327,4 +333,5 @@ module.exports = {
     deleteConsumer,
     getMyProfile,
     updateMyProfile,
+    getLatestReading,
 };

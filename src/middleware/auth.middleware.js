@@ -20,10 +20,13 @@ const protect = (req, res, next) => {
 
 const authorize = (...roles) => {
     return (req, res, next) => {
-        if (!roles.includes(req.user.role)) {
+        const userRole = req.user.role?.toUpperCase();
+        const allowedRoles = roles.map(r => r.toUpperCase());
+
+        if (!allowedRoles.includes(userRole)) {
             return res.status(403).json({
                 success: false,
-                message: `Access denied. Required role: ${roles.join(' or ')}`,
+                message: `Access denied. Role ${userRole} is not authorized for this resource.`,
             });
         }
         next();

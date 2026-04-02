@@ -2,12 +2,19 @@ const prisma = require('../config/prisma');
 const { createNotification } = require('./notification.controller');
 
 // Helper: calculate bill amount
-const calculateBill = (prevReading, currReading, ratePerUnit = 6.0, taxPercent = 5.0) => {
+const calculateBill = async (consumerType, prevReading, currReading) => {
+    const settings = await prisma.systemSetting.findFirst() || { residentialRate: 6, commercialRate: 8, industrialRate: 12, taxPercent: 5 };
+    
+    let rate = settings.residentialRate;
+    if (consumerType === 'COMMERCIAL') rate = settings.commercialRate;
+    if (consumerType === 'INDUSTRIAL') rate = settings.industrialRate;
+
     const units = currReading - prevReading;
-    const baseAmount = units * ratePerUnit;
-    const taxAmount = baseAmount * (taxPercent / 100);
+    const baseAmount = units * rate;
+    const taxAmount = baseAmount * (settings.taxPercent / 100);
     const totalAmount = baseAmount + taxAmount;
-    return { units, baseAmount, taxAmount, totalAmount };
+    
+    return { units, baseAmount, taxAmount, totalAmount, ratePerUnit: rate, taxPercent: settings.taxPercent };
 };
 
 // ─────────────────────────────────────────
@@ -127,7 +134,7 @@ const generateBill = async (req, res) => {
             });
         }
 
-        const { units, baseAmount, taxAmount, totalAmount } = calculateBill(prevReading, Number(currReading));
+        const { units, baseAmount, taxAmount, totalAmount, ratePerUnit, taxPercent } = await calculateBill(consumer.connectionType, prevReading, Number(currReading));
 
         // Find operator if role is OPERATOR
         let operatorId = null;
@@ -144,6 +151,8 @@ const generateBill = async (req, res) => {
                 currReading: Number(currReading),
                 units,
                 baseAmount,
+                ratePerUnit,
+                taxPercent,
                 taxAmount,
                 totalAmount,
                 dueDate: new Date(dueDate),
@@ -218,14 +227,17 @@ const getDashboardStats = async (req, res) => {
         // All queries fire in PARALLEL — no serial round-trips
         const [
             totalConsumers,
+            onlineMeters,
+            offlineMeters,
             totalBills,
             pendingBills,
             paidPayments,
             recentPayments,
             recentComplaints,
-            rawMonthlyRevenue,
         ] = await Promise.all([
             prisma.consumer.count(),
+            prisma.meter.count({ where: { status: 'Connected' } }),
+            prisma.meter.count({ where: { status: { not: 'Connected' } } }),
 
             prisma.bill.count(),
 
@@ -264,34 +276,45 @@ const getDashboardStats = async (req, res) => {
                     consumer: { select: { user: { select: { name: true } } } },
                 },
             }),
-
-            prisma.$queryRaw`
-                SELECT
-                    DATE_FORMAT(paidAt, '%b') as name,
-                    SUM(amount) as revenue
-                FROM payments
-                WHERE status = 'SUCCESS'
-                  AND paidAt >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-                GROUP BY DATE_FORMAT(paidAt, '%Y-%m'), DATE_FORMAT(paidAt, '%b')
-                ORDER BY DATE_FORMAT(paidAt, '%Y-%m') ASC
-            `,
         ]);
 
-        const monthlyRevenue = rawMonthlyRevenue.map(item => ({
-            name: item.name,
-            revenue: Number(item.revenue) || 0,
+        // Handle Monthly Revenue grouping in JS for cross-DB compatibility (SQLite/MySQL)
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        
+        const paymentsForChart = await prisma.payment.findMany({
+            where: {
+                status: 'SUCCESS',
+                paidAt: { gte: sixMonthsAgo }
+            },
+            select: { amount: true, paidAt: true },
+            orderBy: { paidAt: 'asc' }
+        });
+
+        const revenueMap = {};
+        paymentsForChart.forEach(p => {
+            const month = p.paidAt.toLocaleString('en-US', { month: 'short' });
+            revenueMap[month] = (revenueMap[month] || 0) + p.amount;
+        });
+
+        const monthlyRevenue = Object.entries(revenueMap).map(([name, revenue]) => ({
+            name,
+            revenue: Number(revenue.toFixed(2))
         }));
 
         res.status(200).json({
             success: true,
             data: {
                 totalConsumers,
+                onlineMeters,
+                offlineMeters,
+                totalMeters: onlineMeters + offlineMeters,
                 totalBills,
                 pendingAmount: Number(pendingBills._sum.totalAmount || 0),
                 paidAmount: Number(paidPayments._sum.amount || 0),
                 recentPayments: recentPayments.map((p) => ({
                     id: p.id,
-                    consumerName: p.consumer.user.name,
+                    consumerName: p.consumer?.user?.name || 'Unknown',
                     amount: p.amount,
                     mode: p.mode,
                     paidAt: p.paidAt,
@@ -299,7 +322,7 @@ const getDashboardStats = async (req, res) => {
                 })),
                 recentComplaints: recentComplaints.map((c) => ({
                     id: c.id,
-                    consumerName: c.consumer.user.name,
+                    consumerName: c.consumer?.user?.name || 'Unknown',
                     type: c.type,
                     status: c.status,
                     createdAt: c.createdAt,

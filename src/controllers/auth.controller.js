@@ -17,7 +17,8 @@ const login = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email and password are required.' });
         }
 
-        const user = await prisma.user.findUnique({ where: { email } });
+        const normalizedEmail = email.toLowerCase().trim();
+        const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
 
         if (!user) {
             return res.status(401).json({ success: false, message: 'Invalid credentials.' });
@@ -63,7 +64,15 @@ const getMe = async (req, res) => {
             where: { id: req.user.id },
             select: { id: true, name: true, email: true, role: true, createdAt: true },
         });
-        res.status(200).json({ success: true, user });
+        if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
+
+        res.status(200).json({ 
+            success: true, 
+            user: {
+                ...user,
+                role: user.role.toLowerCase()
+            } 
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: 'Server error.' });
     }

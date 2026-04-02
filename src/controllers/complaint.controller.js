@@ -1,5 +1,15 @@
 const prisma = require('../config/prisma');
-const { createNotification } = require('./notification.controller');
+
+// Internal notification creator
+const triggerNotification = async (userId, title, message) => {
+    try {
+        await prisma.notification.create({
+            data: { userId, title, message }
+        });
+    } catch (error) {
+        console.warn('Notification trigger failed:', error.message);
+    }
+};
 
 // ─────────────────────────────────────────
 // POST /api/complaints  (Consumer - raise)
@@ -27,7 +37,7 @@ const raiseComplaint = async (req, res) => {
         });
 
         // Trigger Notification
-        await createNotification(
+        await triggerNotification(
             userId,
             'Complaint Raised 📢',
             `Your complaint regarding "${subject}" has been registered successfully. Ref: #${complaint.complaintNumber.slice(0, 8).toUpperCase()}.`
@@ -50,7 +60,7 @@ const raiseComplaint = async (req, res) => {
 const getMyComplaints = async (req, res) => {
     try {
         const consumer = await prisma.consumer.findUnique({ where: { userId: req.user.id } });
-        if (!consumer) return res.status(404).json({ success: false, message: 'Consumer not found.' });
+        if (!consumer) return res.status(404).json({ success: false, message: 'Consumer profile not found.' });
 
         const complaints = await prisma.complaint.findMany({
             where: { consumerId: consumer.id },
@@ -59,6 +69,7 @@ const getMyComplaints = async (req, res) => {
 
         res.status(200).json({ success: true, data: complaints });
     } catch (error) {
+        console.error('getMyComplaints Error:', error);
         res.status(500).json({ success: false, message: 'Server error.' });
     }
 };
@@ -75,7 +86,11 @@ const getAllComplaints = async (req, res) => {
         const complaints = await prisma.complaint.findMany({
             where,
             include: {
-                consumer: { include: { user: { select: { name: true } } } },
+                consumer: {
+                    include: {
+                        user: { select: { name: true } }
+                    }
+                },
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -83,23 +98,25 @@ const getAllComplaints = async (req, res) => {
         const formatted = complaints.map((c) => ({
             id: c.id,
             complaintNumber: c.complaintNumber,
-            consumerName: c.consumer.user.name,
+            consumerName: c.consumer?.user?.name || 'Unknown Consumer',
             type: c.type,
             subject: c.subject,
             description: c.description,
             status: c.status,
             assignedTo: c.assignedTo || 'Unassigned',
             createdAt: c.createdAt,
+            resolvedAt: c.resolvedAt
         }));
 
         res.status(200).json({ success: true, data: formatted });
     } catch (error) {
+        console.error('getAllComplaints Error:', error);
         res.status(500).json({ success: false, message: 'Server error.' });
     }
 };
 
 // ─────────────────────────────────────────
-// PUT /api/complaints/:id  (Admin + Operator - update status/assign)
+// PATCH /api/complaints/:id  (Admin + Operator - update status/assign)
 // ─────────────────────────────────────────
 const updateComplaintStatus = async (req, res) => {
     try {
@@ -118,8 +135,8 @@ const updateComplaintStatus = async (req, res) => {
         });
 
         // Trigger Notification
-        if (status) {
-            await createNotification(
+        if (status && updated.consumer) {
+            await triggerNotification(
                 updated.consumer.userId,
                 `Complaint Update: ${status.replace(/_/g, ' ')} 📋`,
                 `The status of your complaint #${updated.complaintNumber.slice(0, 8).toUpperCase()} has been updated to ${status.replace(/_/g, ' ')}.`
@@ -132,6 +149,7 @@ const updateComplaintStatus = async (req, res) => {
             data: updated,
         });
     } catch (error) {
+        console.error('updateComplaintStatus Error:', error);
         res.status(500).json({ success: false, message: 'Server error.' });
     }
 };

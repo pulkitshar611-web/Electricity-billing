@@ -109,4 +109,61 @@ const getAllPayments = async (req, res) => {
     }
 };
 
-module.exports = { processPayment, getMyPayments, getAllPayments };
+// ─────────────────────────────────────────
+// POST /api/payments/manual (Admin + Operator)
+// ─────────────────────────────────────────
+const recordManualPayment = async (req, res) => {
+    try {
+        const { billId, amount, mode, paidAt } = req.body;
+
+        if (!billId || !amount) {
+            return res.status(400).json({ success: false, message: 'Bill ID and amount are required.' });
+        }
+
+        const bill = await prisma.bill.findUnique({ 
+            where: { id: Number(billId) },
+            include: { consumer: true }
+        });
+        
+        if (!bill) return res.status(404).json({ success: false, message: 'Bill not found.' });
+        if (bill.status === 'PAID') return res.status(400).json({ success: false, message: 'Bill is already paid.' });
+
+        const payment = await prisma.$transaction(async (tx) => {
+            const p = await tx.payment.create({
+                data: {
+                    billId: Number(billId),
+                    consumerId: bill.consumerId,
+                    amount: Number(amount),
+                    mode: mode || 'CASH',
+                    status: 'SUCCESS',
+                    paidAt: paidAt ? new Date(paidAt) : new Date(),
+                },
+            });
+
+            await tx.bill.update({
+                where: { id: Number(billId) },
+                data: { status: 'PAID', updatedAt: new Date() },
+            });
+
+            return p;
+        });
+
+        // Trigger Notification
+        await createNotification(
+            bill.consumer.userId,
+            'Manual Payment Recorded ✅',
+            `A payment of ₹${Number(amount).toFixed(2)} for Bill #${bill.billNumber} has been manually recorded by the administrator.`
+        );
+
+        res.status(201).json({
+            success: true,
+            message: 'Manual payment recorded successfully.',
+            data: payment,
+        });
+    } catch (error) {
+        console.error('recordManualPayment Error:', error);
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
+    }
+};
+
+module.exports = { processPayment, getMyPayments, getAllPayments, recordManualPayment };

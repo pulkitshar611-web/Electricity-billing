@@ -89,14 +89,14 @@ const getOperatorDashboard = async (req, res) => {
                 recentBills: recentBills.map((b) => ({
                     id: b.id,
                     billNumber: b.billNumber,
-                    consumerName: b.consumer.user.name,
+                    consumerName: b.consumer?.user?.name || 'Unknown',
                     amount: b.totalAmount,
                     status: b.status,
                     createdAt: b.createdAt,
                 })),
                 pendingComplaints: pendingComplaints.map((c) => ({
                     id: c.id,
-                    consumerName: c.consumer.user.name,
+                    consumerName: c.consumer?.user?.name || 'Unknown',
                     subject: c.subject,
                     type: c.type,
                     createdAt: c.createdAt,
@@ -445,7 +445,7 @@ const getOperatorComplaints = async (req, res) => {
         const formatted = complaints.map((c) => ({
             id: c.id,
             complaintNumber: c.complaintNumber,
-            consumerName: c.consumer.user.name,
+            consumerName: c.consumer?.user?.name || 'Unknown',
             consumerId: c.consumerId,
             subject: c.subject,
             type: c.type,
