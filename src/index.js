@@ -61,7 +61,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Master API Router
+// MASTER API ROUTER
+console.log('🛠️ Initializing Master API Router at /api...');
 const apiRouter = express.Router();
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/consumers', consumerRoutes);
@@ -75,13 +76,21 @@ apiRouter.use('/meters', meterRoutes);
 apiRouter.use('/reports', reportRoutes);
 
 app.use('/api', apiRouter);
-
+console.log('✅ Route /api/meters registered successfully');
 
 // Catch-all for undefined API routes (Proper Debugging)
 app.use('*', (req, res) => {
   const msg = `[API_ERROR] ${req.method} ${req.originalUrl} - Route NOT defined in Backend.`;
   console.error(msg);
-  res.status(404).json({ success: false, message: msg, debug: { path: req.originalUrl, method: req.method } });
+  res.status(404).json({ 
+    success: false, 
+    message: msg, 
+    debug: { 
+      path: req.originalUrl, 
+      method: req.method,
+      stack: 'Check index.js route registrations'
+    } 
+  });
 });
 
 // Base route
@@ -100,8 +109,8 @@ io.on('connection', (socket) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ success: false, message: 'Internal Server Error' });
+  console.error('💥 UNHANDLED ERROR:', err.stack);
+  res.status(500).json({ success: false, message: 'Internal Server Error', error: err.message });
 });
 
 // Initialize Modbus Engine
@@ -109,6 +118,11 @@ modbusEngine.init(io);
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-  console.log(`Socket.io server path: /socket.io/`);
+  console.log(`\n🚀 SERVER RUNNING 🚀`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`MODE: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`PORT: ${PORT}`);
+  const dbUrl = process.env.DATABASE_URL || '';
+  console.log(`DB_URL: ${dbUrl.split('@')[1] ? '***@' + dbUrl.split('@')[1] : 'Localhost/Not Defined'}`);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
 });
